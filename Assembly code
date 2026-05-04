@@ -1,0 +1,71 @@
+.syntax unified
+.cpu cortex-m4
+.thumb
+
+@ =============================================
+@ game.s - Umbral Veil Assembly Helpers
+@ =============================================
+
+.global calculate_power
+.global check_answer
+.global get_puzzle_threshold
+
+.section .text
+.align 2
+
+@ -----------------------------------------------
+@ calculate_power(int difficulty, int base_power)
+@   difficulty: 0 = Easy, 1 = Hard
+@   returns: adjusted power value
+@ -----------------------------------------------
+.thumb_func
+.type calculate_power, %function
+calculate_power:
+    push {r4, lr}
+    cmp r0, #1
+    beq .hard_mode
+    @ Easy Mode: base_power + 10
+    add r0, r1, #10
+    b .power_done
+.hard_mode:
+    @ Hard Mode: base_power - 5 (min 1)
+    subs r0, r1, #5
+    it lt
+    movlt r0, #1
+.power_done:
+    pop {r4, pc}
+    .size calculate_power, .-calculate_power
+
+@ -----------------------------------------------
+@ check_answer(int player_answer, int correct_answer)
+@   returns: 1 if correct, 0 if wrong
+@ -----------------------------------------------
+.thumb_func
+.type check_answer, %function
+check_answer:
+    push {lr}
+    cmp r0, r1
+    ite eq
+    moveq r0, #1
+    movne r0, #0
+    pop {pc}
+    .size check_answer, .-check_answer
+
+@ -----------------------------------------------
+@ get_puzzle_threshold(int difficulty)
+@   difficulty: 0 = Easy, 1 = Hard
+@   returns: number of hints allowed
+@            Easy=3 hints, Hard=1 hint
+@ -----------------------------------------------
+.thumb_func
+.type get_puzzle_threshold, %function
+get_puzzle_threshold:
+    push {lr}
+    cmp r0, #1
+    ite eq
+    moveq r0, #1
+    movne r0, #3
+    pop {pc}
+    .size get_puzzle_threshold, .-get_puzzle_threshold
+
+
