@@ -1,0 +1,356 @@
+/* ============================================================
+ *  Umbral Veil - main.c
+ *  STM32 Nucleo L476RG  |  C + Assembly
+ *  DEMO MODE - runs automatically, no input needed
+ *  Plain ASCII only (Cp1252 safe)
+ * ============================================================ */
+
+#include <stdio.h>
+
+extern void initialise_monitor_handles(void);
+
+/* Assembly functions in game.s */
+extern int calculate_power(int difficulty, int base_power);
+extern int check_answer(int player_answer, int correct_answer);
+extern int get_puzzle_threshold(int difficulty);
+
+/* ── Helpers ─────────────────────────────────────────────── */
+static void flush(void) { fflush(stdout); }
+
+static void print_line(void) {
+    printf("========================================\n"); flush();
+}
+
+/* ============================================================
+ *  ASCII ART 1 - Title
+ * ============================================================ */
+static void art_title(void) {
+    printf("\n");
+    printf(" _   _  _   _  ____   ____    _    _     \n"); flush();
+    printf("| | | ||_| |_|| __ ) |  _ \\  / \\  | |    \n"); flush();
+    printf("| | | || _ _ ||  _ \\ | |_) |/ _ \\ | |    \n"); flush();
+    printf("| |_| || | | || |_) ||  _ </ ___ \\| |___ \n"); flush();
+    printf(" \\___/ |_| |_||____/ |_| \\_/_/   \\_\\_____|\n"); flush();
+    printf("\n"); flush();
+    printf("          V    E    I    L\n"); flush();
+    printf("\n"); flush();
+}
+
+/* ============================================================
+ *  ASCII ART 2 - Ruined Village
+ * ============================================================ */
+static void art_village(void) {
+    printf("\n");
+    printf("   /\\      /\\___      /\\      /\\___  \n"); flush();
+    printf("  /  \\    /     \\    /  \\    /     \\ \n"); flush();
+    printf(" |    |  |  [X]  |  |    |  |  [ ]  |\n"); flush();
+    printf(" | __ |  |       |  | __ |  |       |\n"); flush();
+    printf(" |[  ]|  |  [X]  |  |[  ]|  |  [ ]  |\n"); flush();
+    printf(" |    |  |       |  |    |  |       |\n"); flush();
+    printf(" |____|  |_______|  |____|  |_______|\n"); flush();
+    printf("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~\n"); flush();
+    printf("  ~~  RUINED VILLAGE  ~~ CURSED ~~  \n"); flush();
+    printf("\n"); flush();
+}
+
+/* ============================================================
+ *  ASCII ART 3 - Shadow Gate
+ * ============================================================ */
+static void art_shadow_gate(void) {
+    printf("\n");
+    printf("  *  *  *  *  *  *  *  *  *  *\n"); flush();
+    printf("  * DARKNESS STIRS BEYOND... *\n"); flush();
+    printf("  *  *  *  *  *  *  *  *  *  *\n"); flush();
+    printf("        |              |\n"); flush();
+    printf("   _____|__          __|_____\n"); flush();
+    printf("  |   *   |          |   *   |\n"); flush();
+    printf("  |  ***  |          |  ***  |\n"); flush();
+    printf("  | ***** |          | ***** |\n"); flush();
+    printf("  |_______|          |_______|\n"); flush();
+    printf("        |   ______   |\n"); flush();
+    printf("        |__|      |__|\n"); flush();
+    printf("           |      |\n"); flush();
+    printf("       ~~~~|      |~~~~\n"); flush();
+    printf("        * THE SHADOW GATE *\n"); flush();
+    printf("\n"); flush();
+}
+
+/* ============================================================
+ *  ASCII ART 4 - Win Screen
+ * ============================================================ */
+static void art_win(void) {
+    printf("\n");
+    printf("  *******************************\n"); flush();
+    printf("  *                             *\n"); flush();
+    printf("  *      *** YOU WIN! ***       *\n"); flush();
+    printf("  *      V I C T O R Y         *\n"); flush();
+    printf("  *   The Veil is lifted!       *\n"); flush();
+    printf("  *   World Restored.           *\n"); flush();
+    printf("  *                             *\n"); flush();
+    printf("  *******************************\n"); flush();
+    printf("\n"); flush();
+}
+
+/* ============================================================
+ *  MAP ROWS
+ * ============================================================ */
+static const char* frows[5] = {
+    "  # # # # #",
+    "  # . . . #",
+    "  E . I . #",
+    "  # . . . #",
+    "  # # # # #"
+};
+static const char* trows[5] = {
+    "  # # # # #",
+    "  # . . B #",
+    "  # . . . #",
+    "  # . . . #",
+    "  # # E # #"
+};
+
+/* ============================================================
+ *  MAP DISPLAY
+ * ============================================================ */
+static void show_map(int map_area, int player_row,
+                     int item_found, int boss_found) {
+    int r, col, placed;
+    const char* row;
+    char ch;
+    print_line();
+    if (map_area == 0) {
+        printf("  AREA 1: RUINED VILLAGE MAP\n\n"); flush();
+        for (r = 0; r < 5; r++) {
+            row = frows[r];
+            placed = 0; col = 0;
+            while (row[col] != '\0') {
+                ch = row[col];
+                if (r == player_row && ch == '.' && !placed) {
+                    putchar('P'); placed = 1;
+                } else if (ch == 'I' && item_found) {
+                    putchar('.');
+                } else {
+                    putchar(ch);
+                }
+                col++;
+            }
+            printf("\n"); flush();
+        }
+        printf("\n  LEGEND: E=Entrance  I=Item  P=You  #=Ruins\n"); flush();
+        if (!item_found) {
+            printf("  KEY ITEM: Broken Sword [I] - not found\n"); flush();
+        } else {
+            printf("  KEY ITEM: Broken Sword [I] - COLLECTED!\n"); flush();
+        }
+    } else {
+        printf("  AREA 2: SHADOW GATE MAP\n\n"); flush();
+        for (r = 0; r < 5; r++) {
+            row = trows[r];
+            placed = 0; col = 0;
+            while (row[col] != '\0') {
+                ch = row[col];
+                if (r == player_row && ch == '.' && !placed) {
+                    putchar('P'); placed = 1;
+                } else if (ch == 'B' && boss_found) {
+                    putchar('X');
+                } else {
+                    putchar(ch);
+                }
+                col++;
+            }
+            printf("\n"); flush();
+        }
+        printf("\n  LEGEND: E=Entrance  B=Boss  P=You  X=Defeated\n"); flush();
+        if (!boss_found) {
+            printf("  KEY ITEM: Ancient Guardian [B] - not defeated\n"); flush();
+        } else {
+            printf("  KEY ITEM: Ancient Guardian [B] - DEFEATED!\n"); flush();
+        }
+    }
+    print_line();
+}
+
+/* ============================================================
+ *  PUZZLE 1 - Shadow Altar  (answer: 3)
+ * ============================================================ */
+static int puzzle_symbol(int difficulty) {
+    int hints = get_puzzle_threshold(difficulty);
+    print_line();
+    printf("  PUZZLE 1 - THE SHADOW ALTAR\n\n"); flush();
+    printf("  Dark whispers echo from the altar:\n\n"); flush();
+    printf("  'I have cities but no houses live there.\n"); flush();
+    printf("   I have mountains but no trees grow.\n"); flush();
+    printf("   I have water but no fish swim.\n"); flush();
+    printf("   Speak my name to gain shadow magic.'\n\n"); flush();
+    if (hints >= 2) { printf("  HINT 1: You can hold it in your hands.\n"); flush(); }
+    if (hints >= 2) { printf("  HINT 2: Travelers use it before a journey.\n"); flush(); }
+    if (hints >= 3) { printf("  HINT 3: It shows you where to go.\n"); flush(); }
+    printf("\n"); flush();
+    printf("  1) A Dream\n"); flush();
+    printf("  2) A Mirror\n"); flush();
+    printf("  3) A Map\n"); flush();
+    printf("  4) A Clock\n\n"); flush();
+    printf("  PLAYER ANSWERS: 3\n"); flush();
+    if (check_answer(3, 3)) {
+        printf("  CORRECT! Shadow Magic gained!\n\n"); flush();
+        return 1;
+    }
+    return 0;
+}
+
+/* ============================================================
+ *  PUZZLE 2 - Ancient Gate  (answer: 16)
+ * ============================================================ */
+static int puzzle_gate(int difficulty) {
+    int hints = get_puzzle_threshold(difficulty);
+    print_line();
+    printf("  PUZZLE 2 - THE ANCIENT GATE\n\n"); flush();
+    printf("  Runes glow on the gate stone:\n\n"); flush();
+    printf("  2 , 4 , 8 , ___?\n\n"); flush();
+    printf("  Solve the sequence to unlock the gate.\n\n"); flush();
+    if (hints >= 2) { printf("  HINT 1: Each number doubles.\n"); flush(); }
+    if (hints >= 3) { printf("  HINT 2: 8 x 2 = ?\n"); flush(); }
+    printf("\n"); flush();
+    printf("  PLAYER ANSWERS: 16\n"); flush();
+    if (check_answer(16, 16)) {
+        printf("  CORRECT! The gate creaks open!\n"); flush();
+        printf("  A Veil Crystal drops to the ground!\n\n"); flush();
+        return 1;
+    }
+    return 0;
+}
+
+/* ============================================================
+ *  PUZZLE 3 - Ancient Guardian  (answer: 1)
+ * ============================================================ */
+static int puzzle_guardian(int difficulty) {
+    int hints = get_puzzle_threshold(difficulty);
+    print_line();
+    printf("  PUZZLE 3 - THE ANCIENT GUARDIAN\n\n"); flush();
+    printf("  The Guardian rises from the dust!\n"); flush();
+    printf("  It roars a final cipher:\n\n"); flush();
+    printf("  'If 1=5, 2=10, 3=15, 4=20...\n"); flush();
+    printf("   Then what does 5 equal?'\n\n"); flush();
+    if (hints >= 2) { printf("  HINT 1: Look at the FIRST equation carefully.\n"); flush(); }
+    if (hints >= 3) { printf("  HINT 2: Since 1=5, then 5=? Reverse it!\n"); flush(); }
+    printf("\n"); flush();
+    printf("  PLAYER ANSWERS: 1\n"); flush();
+    if (check_answer(1, 1)) {
+        printf("  CORRECT! The Guardian falls!\n\n"); flush();
+        return 1;
+    }
+    return 0;
+}
+
+/* ============================================================
+ *  MAIN
+ * ============================================================ */
+int main(void) {
+    int difficulty  = 0;
+    int item_found  = 0;
+    int boss_found  = 0;
+    int puzzles_won = 0;
+    initialise_monitor_handles();
+
+    /* MAIN MENU */
+    art_title();
+    print_line();
+    printf("            MAIN MENU\n"); flush();
+    print_line();
+    printf("  1. Start Game\n"); flush();
+    printf("  2. How To Play\n"); flush();
+    printf("  3. Quit\n"); flush();
+    print_line();
+    printf("  PLAYER SELECTS: 1 (Start Game)\n\n"); flush();
+
+    /* HOW TO PLAY */
+    print_line();
+    printf("  HOW TO PLAY:\n\n"); flush();
+    printf("  - A dark force has spread across the land.\n"); flush();
+    printf("  - You are marked by the Veil.\n"); flush();
+    printf("  - Pick your spirit and difficulty.\n"); flush();
+    printf("  - Explore 2 cursed areas.\n"); flush();
+    printf("  - Solve 3 puzzles to defeat the darkness.\n"); flush();
+    printf("  - Easy = 3 hints.  Hard = 1 hint.\n"); flush();
+    printf("  - Solve 2 out of 3 puzzles to win!\n"); flush();
+    print_line();
+
+    /* CHARACTER SELECTION */
+    print_line();
+    printf("  --- SPIRIT SELECTION ---\n"); flush();
+    print_line();
+    printf("   1. Iron Warden\n"); flush();
+    printf("   2. Sun Sage\n"); flush();
+    printf("   3. Void Stalker\n"); flush();
+    printf("   4. Ember Knight\n"); flush();
+    printf("   5. Mist Weaver\n"); flush();
+    printf("   6. Storm Caller\n"); flush();
+    printf("   7. Grave Bound\n"); flush();
+    printf("   8. Lunar Acolyte\n"); flush();
+    printf("   9. Frost Reaver\n"); flush();
+    printf("  10. Abyss Watcher\n\n"); flush();
+    printf("  PLAYER SELECTS: 3 (Void Stalker)\n\n"); flush();
+    printf("  Bound to: Void Stalker\n\n"); flush();
+
+    /* DIFFICULTY */
+    print_line();
+    printf("  --- DIFFICULTY ---\n"); flush();
+    print_line();
+    printf("  1. EASY  (3 hints, bonus power)\n"); flush();
+    printf("  2. HARD  (1 hint, reduced power)\n\n"); flush();
+    printf("  PLAYER SELECTS: 1 (Easy)\n\n"); flush();
+
+    (void)calculate_power(difficulty, 10);
+    printf("  Spirit     : Void Stalker\n"); flush();
+    printf("  Difficulty : EASY\n"); flush();
+    printf("  Power      : 20\n\n"); flush();
+
+    /* AREA 1: RUINED VILLAGE */
+    art_village();
+    printf("  You awaken in the Ruined Village...\n"); flush();
+    printf("  Dark whispers call you deeper.\n\n"); flush();
+    show_map(0, 1, item_found, boss_found);
+
+    printf("  You find a wounded traveler.\n"); flush();
+    printf("  They point toward a glowing altar.\n\n"); flush();
+    show_map(0, 2, item_found, boss_found);
+
+    printf("  The Shadow Altar pulses with dark energy!\n\n"); flush();
+    puzzles_won += puzzle_symbol(difficulty);
+    puzzles_won += puzzle_gate(difficulty);
+
+    item_found = 1;
+    show_map(0, 3, item_found, boss_found);
+    printf("  You grab the Broken Sword!\n"); flush();
+    printf("  Shadow Magic surges through your veins.\n"); flush();
+    printf("  The Shadow Gate opens before you.\n\n"); flush();
+
+    /* AREA 2: SHADOW GATE */
+    art_shadow_gate();
+    printf("  You pass through the Shadow Gate...\n\n"); flush();
+    show_map(1, 3, item_found, boss_found);
+
+    printf("  The Ancient Guardian rises!\n\n"); flush();
+    show_map(1, 1, item_found, boss_found);
+
+    puzzles_won += puzzle_guardian(difficulty);
+
+    boss_found = 1;
+    show_map(1, 1, item_found, boss_found);
+
+    /* WIN / LOSE */
+    print_line();
+    if (puzzles_won >= 2) {
+        art_win();
+        printf("  Well done, Void Stalker!\n"); flush();
+        printf("  Puzzles solved: 3 out of 3.\n"); flush();
+        printf("  The Umbral Veil is lifted.\n"); flush();
+        printf("  Sunlight returns to the realm.\n\n"); flush();
+    } else {
+        printf("  The Veil claims you, Void Stalker...\n"); flush();
+        printf("  The darkness holds. (Need 2/3 to win)\n\n"); flush();
+    }
+    print_line();
+
+    while(1);
+}
